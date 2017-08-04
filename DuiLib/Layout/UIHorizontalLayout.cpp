@@ -5,13 +5,13 @@ namespace DuiLib
 {
 	CHorizontalLayoutUI::CHorizontalLayoutUI() : m_iSepWidth(0), m_uButtonState(0), m_bImmMode(false)
 	{
-		ptLastMouse.x = ptLastMouse.y = 0;
+		m_ptLastMouse.x = m_ptLastMouse.y = 0;
 		::ZeroMemory(&m_rcNewPos, sizeof(m_rcNewPos));
 	}
 
 	LPCTSTR CHorizontalLayoutUI::GetClass() const
 	{
-		return _T("HorizontalLayoutUI");
+		return DUI_CTR_HORIZONTALLAYOUT;
 	}
 
 	LPVOID CHorizontalLayoutUI::GetInterface(LPCTSTR pstrName)
@@ -71,14 +71,22 @@ namespace DuiLib
 			if (iControlMaxHeight <= 0) iControlMaxHeight = pControl->GetMaxHeight();
 			if (szControlAvailable.cx > iControlMaxWidth) szControlAvailable.cx = iControlMaxWidth;
 			if (szControlAvailable.cy > iControlMaxHeight) szControlAvailable.cy = iControlMaxHeight;
-			SIZE sz = pControl->EstimateSize(szControlAvailable);
-			if( sz.cx == 0 ) {
+			SIZE sz = { 0 };
+			if (pControl->GetFixedWidth() == 0) {
 				nAdjustables++;
+				sz.cy = pControl->GetFixedHeight();
 			}
 			else {
-				if( sz.cx < pControl->GetMinWidth() ) sz.cx = pControl->GetMinWidth();
-				if( sz.cx > pControl->GetMaxWidth() ) sz.cx = pControl->GetMaxWidth();
+				sz = pControl->EstimateSize(szControlAvailable);
+				if (sz.cx == 0) {
+					nAdjustables++;
+				}
+				else {
+					if (sz.cx < pControl->GetMinWidth()) sz.cx = pControl->GetMinWidth();
+					if (sz.cx > pControl->GetMaxWidth()) sz.cx = pControl->GetMaxWidth();
+				}
 			}
+
 			cxFixed += sz.cx + pControl->GetPadding().left + pControl->GetPadding().right;
 
 			sz.cy = MAX(sz.cy, 0);
@@ -99,6 +107,7 @@ namespace DuiLib
 		if( m_pHorizontalScrollBar && m_pHorizontalScrollBar->IsVisible() ) {
 			iPosX -= m_pHorizontalScrollBar->GetScrollPos();
 		}
+		int iEstimate = 0;
 		int iAdjustable = 0;
 		int cxFixedRemaining = cxFixed;
 		for( int it2 = 0; it2 < m_items.GetSize(); it2++ ) {
@@ -108,7 +117,8 @@ namespace DuiLib
 				SetFloatPos(it2);
 				continue;
 			}
-
+			
+			iEstimate += 1;
 			RECT rcPadding = pControl->GetPadding();
 			szRemaining.cx -= rcPadding.left;
 
@@ -120,8 +130,10 @@ namespace DuiLib
 			if (iControlMaxHeight <= 0) iControlMaxHeight = pControl->GetMaxHeight();
 			if (szControlAvailable.cx > iControlMaxWidth) szControlAvailable.cx = iControlMaxWidth;
 			if (szControlAvailable.cy > iControlMaxHeight) szControlAvailable.cy = iControlMaxHeight;
+      cxFixedRemaining = cxFixedRemaining - (rcPadding.left + rcPadding.right);
+			if (iEstimate > 1) cxFixedRemaining = cxFixedRemaining - m_iChildPadding;
 			SIZE sz = pControl->EstimateSize(szControlAvailable);
-			if( sz.cx == 0 ) {
+			if (pControl->GetFixedWidth() == 0 || sz.cx == 0) {
 				iAdjustable++;
 				sz.cx = cxExpand;
 				// Distribute remaining to last element (usually round-off left-overs)
@@ -179,7 +191,6 @@ namespace DuiLib
 
 		// Process the scrollbar
 		ProcessScrollBar(rc, cxNeeded, cyNeeded);
-
 	}
 
 	void CHorizontalLayoutUI::DoPostPaint(HDC hDC, const RECT& rcPaint)
@@ -230,7 +241,7 @@ namespace DuiLib
 				RECT rcSeparator = GetThumbRect(false);
 				if( ::PtInRect(&rcSeparator, event.ptMouse) ) {
 					m_uButtonState |= UISTATE_CAPTURED;
-					ptLastMouse = event.ptMouse;
+					m_ptLastMouse = event.ptMouse;
 					m_rcNewPos = m_rcItem;
 					if( !m_bImmMode && m_pManager ) m_pManager->AddPostPaint(this);
 					return;
@@ -249,8 +260,8 @@ namespace DuiLib
 			if( event.Type == UIEVENT_MOUSEMOVE )
 			{
 				if( (m_uButtonState & UISTATE_CAPTURED) != 0 ) {
-					LONG cx = event.ptMouse.x - ptLastMouse.x;
-					ptLastMouse = event.ptMouse;
+					LONG cx = event.ptMouse.x - m_ptLastMouse.x;
+					m_ptLastMouse = event.ptMouse;
 					RECT rc = m_rcNewPos;
 					if( m_iSepWidth >= 0 ) {
 						if( cx > 0 && event.ptMouse.x < m_rcNewPos.right - m_iSepWidth ) return;

@@ -44,10 +44,11 @@ public:
     ITextServices* GetTextServices(void) { return pserv; }
     void SetClientRect(RECT *prc);
     RECT* GetClientRect() { return &rcClient; }
-    BOOL GetWordWrap(void) { return fWordWrap; }
+    BOOL IsWordWrap(void) { return fWordWrap; }
     void SetWordWrap(BOOL fWordWrap);
-    BOOL GetReadOnly();
+    BOOL IsReadOnly();
     void SetReadOnly(BOOL fReadOnly);
+
     void SetFont(HFONT hFont);
     void SetColor(DWORD dwColor);
     SIZEL* GetExtent();
@@ -268,7 +269,7 @@ CTxtWinHost::~CTxtWinHost()
 
 BOOL CTxtWinHost::Init(CRichEditUI *re, const CREATESTRUCT *pcs)
 {
-    IUnknown *pUnk;
+	IUnknown *pUnk = NULL;
     HRESULT hr;
 
     m_re = re;
@@ -316,7 +317,7 @@ BOOL CTxtWinHost::Init(CRichEditUI *re, const CREATESTRUCT *pcs)
     //if(FAILED(CreateTextServices(NULL, this, &pUnk)))
     //    goto err;
 
-	PCreateTextServices TextServicesProc;
+	PCreateTextServices TextServicesProc = NULL;
 	HMODULE hmod = LoadLibrary(_T("msftedit.dll"));
 	if (hmod)
 	{
@@ -765,7 +766,7 @@ void CTxtWinHost::SetWordWrap(BOOL fWordWrap)
     pserv->OnTxPropertyBitsChange(TXTBIT_WORDWRAP, fWordWrap ? TXTBIT_WORDWRAP : 0);
 }
 
-BOOL CTxtWinHost::GetReadOnly()
+BOOL CTxtWinHost::IsReadOnly()
 {
     return (dwStyle & ES_READONLY) != 0;
 }
@@ -1078,6 +1079,7 @@ CRichEditUI::CRichEditUI() : m_pTwh(NULL), m_bVScrollBarFixing(false), m_bWantTa
     m_bWantCtrlReturn(true), m_bTransparent(true), m_bRich(true), m_bReadOnly(false), m_bWordWrap(false), m_dwTextColor(0), m_iFont(-1), 
 	m_iLimitText(cInitTextMax), m_lTwhStyle(ES_MULTILINE), m_bDrawCaret(true), m_bInited(false)
 {
+	::ZeroMemory(&m_rcTextPadding, sizeof(m_rcTextPadding));
 }
 
 CRichEditUI::~CRichEditUI()
@@ -1090,7 +1092,7 @@ CRichEditUI::~CRichEditUI()
 
 LPCTSTR CRichEditUI::GetClass() const
 {
-    return _T("RichEditUI");
+    return DUI_CTR_RICHEDIT;
 }
 
 LPVOID CRichEditUI::GetInterface(LPCTSTR pstrName)
@@ -1169,7 +1171,7 @@ void CRichEditUI::SetReadOnly(bool bReadOnly)
     if( m_pTwh ) m_pTwh->SetReadOnly(bReadOnly);
 }
 
-bool CRichEditUI::GetWordWrap()
+bool CRichEditUI::IsWordWrap()
 {
     return m_bWordWrap;
 }
@@ -1294,7 +1296,7 @@ void CRichEditUI::SetText(LPCTSTR pstrText)
     ReplaceSel(pstrText, FALSE);
 }
 
-bool CRichEditUI::GetModify() const
+bool CRichEditUI::IsModify() const
 { 
     if( !m_pTwh ) return false;
     LRESULT lResult;
@@ -1689,6 +1691,17 @@ long CRichEditUI::StreamOut(int nFormat, EDITSTREAM &es)
     return (long)lResult; 
 }
 
+RECT CRichEditUI::GetTextPadding() const
+{
+	return m_rcTextPadding;
+}
+
+void CRichEditUI::SetTextPadding(RECT rc)
+{
+	m_rcTextPadding = rc;
+	Invalidate();
+}
+
 void CRichEditUI::DoInit()
 {
 	if(m_bInited)
@@ -1967,14 +1980,6 @@ void CRichEditUI::DoEvent(TEventUI& event)
     {
         return;
     }
-    if( event.Type == UIEVENT_MOUSEENTER )
-    {
-        return;
-    }
-    if( event.Type == UIEVENT_MOUSELEAVE )
-    {
-        return;
-    }
     if( event.Type > UIEVENT__KEYBEGIN && event.Type < UIEVENT__KEYEND )
     {
         return;
@@ -2018,9 +2023,19 @@ void CRichEditUI::SetPos(RECT rc, bool bNeedInvalidate)
     }
 
     if( m_pTwh != NULL ) {
-        m_pTwh->SetClientRect(&rcScrollView);
+		RECT rcScrollTextView = rcScrollView;
+		rcScrollTextView.left += m_rcTextPadding.left;
+		rcScrollTextView.right -= m_rcTextPadding.right;
+		rcScrollTextView.top += m_rcTextPadding.top;
+		rcScrollTextView.bottom -= m_rcTextPadding.bottom;
+		RECT rcText = rc;
+		rcText.left += m_rcTextPadding.left;
+		rcText.right -= m_rcTextPadding.right;
+		rcText.top += m_rcTextPadding.top;
+		rcText.bottom -= m_rcTextPadding.bottom;
+        m_pTwh->SetClientRect(&rcScrollTextView);
         if( bVScrollBarVisiable && (!m_pVerticalScrollBar->IsVisible() || m_bVScrollBarFixing) ) {
-            LONG lWidth = rc.right - rc.left + m_pVerticalScrollBar->GetFixedWidth();
+            LONG lWidth = rcText.right - rcText.left + m_pVerticalScrollBar->GetFixedWidth();
             LONG lHeight = 0;
             SIZEL szExtent = { -1, -1 };
             m_pTwh->GetTextServices()->TxGetNaturalSize(
@@ -2032,7 +2047,7 @@ void CRichEditUI::SetPos(RECT rc, bool bNeedInvalidate)
                 &szExtent,
                 &lWidth,
                 &lHeight);
-            if( lHeight > rc.bottom - rc.top ) {
+            if( lHeight > rcText.bottom - rcText.top ) {
                 m_pVerticalScrollBar->SetVisible(true);
                 m_pVerticalScrollBar->SetScrollPos(0);
                 m_bVScrollBarFixing = true;
@@ -2091,10 +2106,10 @@ void CRichEditUI::Move(SIZE szOffset, bool bNeedInvalidate)
 	}
 }
 
-void CRichEditUI::DoPaint(HDC hDC, const RECT& rcPaint, CControlUI* pStopControl)
+bool CRichEditUI::DoPaint(HDC hDC, const RECT& rcPaint, CControlUI* pStopControl)
 {
     RECT rcTemp = { 0 };
-    if( !::IntersectRect(&rcTemp, &rcPaint, &m_rcItem) ) return;
+    if( !::IntersectRect(&rcTemp, &rcPaint, &m_rcItem) ) return true;
 
     CRenderClip clip;
     CRenderClip::GenerateClip(hDC, rcTemp, clip);
@@ -2149,12 +2164,12 @@ void CRichEditUI::DoPaint(HDC hDC, const RECT& rcPaint, CControlUI* pStopControl
         if( !::IntersectRect(&rcTemp, &rcPaint, &rc) ) {
             for( int it = 0; it < m_items.GetSize(); it++ ) {
                 CControlUI* pControl = static_cast<CControlUI*>(m_items[it]);
-				if( pControl == pStopControl ) break;
+				if( pControl == pStopControl ) return false;
                 if( !pControl->IsVisible() ) continue;
                 if( !::IntersectRect(&rcTemp, &rcPaint, &pControl->GetPos()) ) continue;
                 if( pControl->IsFloat() ) {
                     if( !::IntersectRect(&rcTemp, &m_rcItem, &pControl->GetPos()) ) continue;
-                    pControl->Paint(hDC, rcPaint, pStopControl);
+                    if( !pControl->Paint(hDC, rcPaint, pStopControl) ) return false;
                 }
             }
         }
@@ -2163,18 +2178,18 @@ void CRichEditUI::DoPaint(HDC hDC, const RECT& rcPaint, CControlUI* pStopControl
             CRenderClip::GenerateClip(hDC, rcTemp, childClip);
             for( int it = 0; it < m_items.GetSize(); it++ ) {
                 CControlUI* pControl = static_cast<CControlUI*>(m_items[it]);
-				if( pControl == pStopControl ) break;
+				if( pControl == pStopControl ) return false;
                 if( !pControl->IsVisible() ) continue;
                 if( !::IntersectRect(&rcTemp, &rcPaint, &pControl->GetPos()) ) continue;
                 if( pControl->IsFloat() ) {
                     if( !::IntersectRect(&rcTemp, &m_rcItem, &pControl->GetPos()) ) continue;
                     CRenderClip::UseOldClipBegin(hDC, childClip);
-                    pControl->Paint(hDC, rcPaint, pStopControl);
+                    if( !pControl->Paint(hDC, rcPaint, pStopControl) ) return false;
                     CRenderClip::UseOldClipEnd(hDC, childClip);
                 }
                 else {
                     if( !::IntersectRect(&rcTemp, &rc, &pControl->GetPos()) ) continue;
-                    pControl->Paint(hDC, rcPaint, pStopControl);
+                    if( !pControl->Paint(hDC, rcPaint, pStopControl) ) return false;
                 }
             }
         }
@@ -2189,17 +2204,24 @@ void CRichEditUI::DoPaint(HDC hDC, const RECT& rcPaint, CControlUI* pStopControl
 		}
 	}
 
-    if( m_pVerticalScrollBar != NULL && m_pVerticalScrollBar->IsVisible() ) {
-        if( ::IntersectRect(&rcTemp, &rcPaint, &m_pVerticalScrollBar->GetPos()) ) {
-            m_pVerticalScrollBar->Paint(hDC, rcPaint, pStopControl);
+    if( m_pVerticalScrollBar != NULL ) {
+        if( m_pVerticalScrollBar == pStopControl ) return false;
+        if (m_pVerticalScrollBar->IsVisible()) {
+            if( ::IntersectRect(&rcTemp, &rcPaint, &m_pVerticalScrollBar->GetPos()) ) {
+                if( !m_pVerticalScrollBar->Paint(hDC, rcPaint, pStopControl) ) return false;
+            }
         }
     }
 
-    if( m_pHorizontalScrollBar != NULL && m_pHorizontalScrollBar->IsVisible() ) {
-        if( ::IntersectRect(&rcTemp, &rcPaint, &m_pHorizontalScrollBar->GetPos()) ) {
-            m_pHorizontalScrollBar->Paint(hDC, rcPaint, pStopControl);
+    if( m_pHorizontalScrollBar != NULL ) {
+        if( m_pHorizontalScrollBar == pStopControl ) return false;
+        if (m_pHorizontalScrollBar->IsVisible()) {
+            if( ::IntersectRect(&rcTemp, &rcPaint, &m_pHorizontalScrollBar->GetPos()) ) {
+                if( !m_pHorizontalScrollBar->Paint(hDC, rcPaint, pStopControl) ) return false;
+            }
         }
     }
+    return true;
 }
 
 void CRichEditUI::SetAttribute(LPCTSTR pstrName, LPCTSTR pstrValue)
@@ -2262,6 +2284,15 @@ void CRichEditUI::SetAttribute(LPCTSTR pstrName, LPCTSTR pstrValue)
         DWORD clrColor = _tcstoul(pstrValue, &pstr, 16);
         SetTextColor(clrColor);
     }
+	else if( _tcscmp(pstrName, _T("textpadding")) == 0 ) {
+		RECT rcTextPadding = { 0 };
+		LPTSTR pstr = NULL;
+		rcTextPadding.left = _tcstol(pstrValue, &pstr, 10);  ASSERT(pstr);    
+		rcTextPadding.top = _tcstol(pstr + 1, &pstr, 10);    ASSERT(pstr);    
+		rcTextPadding.right = _tcstol(pstr + 1, &pstr, 10);  ASSERT(pstr);    
+		rcTextPadding.bottom = _tcstol(pstr + 1, &pstr, 10); ASSERT(pstr);    
+		SetTextPadding(rcTextPadding);
+	}
     else CContainerUI::SetAttribute(pstrName, pstrValue);
 }
 
@@ -2307,7 +2338,7 @@ LRESULT CRichEditUI::MessageHandler(UINT uMsg, WPARAM wParam, LPARAM lParam, boo
         if( dwHitResult != HITRESULT_HIT ) return 0;
         if( uMsg == WM_SETCURSOR ) bWasHandled = false;
         else if( uMsg == WM_LBUTTONDOWN || uMsg == WM_LBUTTONDBLCLK || uMsg == WM_RBUTTONDOWN ) {
-			::SetFocus(GetManager()->GetPaintWindow());
+			if (!GetManager()->IsNoActivate()) ::SetFocus(GetManager()->GetPaintWindow());
             SetFocus();
         }
     }

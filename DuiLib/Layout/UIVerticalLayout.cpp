@@ -5,13 +5,13 @@ namespace DuiLib
 {
 	CVerticalLayoutUI::CVerticalLayoutUI() : m_iSepHeight(0), m_uButtonState(0), m_bImmMode(false)
 	{
-		ptLastMouse.x = ptLastMouse.y = 0;
+		m_ptLastMouse.x = m_ptLastMouse.y = 0;
 		::ZeroMemory(&m_rcNewPos, sizeof(m_rcNewPos));
 	}
 
 	LPCTSTR CVerticalLayoutUI::GetClass() const
 	{
-		return _T("VerticalLayoutUI");
+		return DUI_CTR_VERTICALLAYOUT;
 	}
 
 	LPVOID CVerticalLayoutUI::GetInterface(LPCTSTR pstrName)
@@ -100,6 +100,7 @@ namespace DuiLib
 			iPosY -= m_pVerticalScrollBar->GetScrollPos();
 		}
 
+		int iEstimate = 0;
 		int iAdjustable = 0;
 		int cyFixedRemaining = cyFixed;
 		for( int it2 = 0; it2 < m_items.GetSize(); it2++ ) {
@@ -110,6 +111,7 @@ namespace DuiLib
 				continue;
 			}
 
+			iEstimate += 1;
 			RECT rcPadding = pControl->GetPadding();
 			szRemaining.cy -= rcPadding.top;
 
@@ -121,6 +123,8 @@ namespace DuiLib
 			if (iControlMaxHeight <= 0) iControlMaxHeight = pControl->GetMaxHeight();
 			if (szControlAvailable.cx > iControlMaxWidth) szControlAvailable.cx = iControlMaxWidth;
 			if (szControlAvailable.cy > iControlMaxHeight) szControlAvailable.cy = iControlMaxHeight;
+      cyFixedRemaining = cyFixedRemaining - (rcPadding.top + rcPadding.bottom);
+			if (iEstimate > 1) cyFixedRemaining = cyFixedRemaining - m_iChildPadding;
 			SIZE sz = pControl->EstimateSize(szControlAvailable);
 			if( sz.cy == 0 ) {
 				iAdjustable++;
@@ -230,7 +234,7 @@ namespace DuiLib
 				RECT rcSeparator = GetThumbRect(false);
 				if( ::PtInRect(&rcSeparator, event.ptMouse) ) {
 					m_uButtonState |= UISTATE_CAPTURED;
-					ptLastMouse = event.ptMouse;
+					m_ptLastMouse = event.ptMouse;
 					m_rcNewPos = m_rcItem;
 					if( !m_bImmMode && m_pManager ) m_pManager->AddPostPaint(this);
 					return;
@@ -249,8 +253,8 @@ namespace DuiLib
 			if( event.Type == UIEVENT_MOUSEMOVE )
 			{
 				if( (m_uButtonState & UISTATE_CAPTURED) != 0 ) {
-					LONG cy = event.ptMouse.y - ptLastMouse.y;
-					ptLastMouse = event.ptMouse;
+					LONG cy = event.ptMouse.y - m_ptLastMouse.y;
+					m_ptLastMouse = event.ptMouse;
 					RECT rc = m_rcNewPos;
 					if( m_iSepHeight >= 0 ) {
 						if( cy > 0 && event.ptMouse.y < m_rcNewPos.bottom + m_iSepHeight ) return;
